@@ -1,0 +1,938 @@
+---
+title: "Actividad de evaluación métodos estadistísticos avanzados"
+author: Daian Paola Fajardo Becerra, Carlos Enrique Salazar Escobar,Hernan Sepulveda
+  Jimenez, Jesus Alberto Arcia Hernandez
+date: "3/10/2020"
+output:
+  html_document: default
+  word_document: default
+  pdf_document: default
+  css: "style.css"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.align="center")
+```
+
+
+<h3 style="text-align: justify;"> Objetivo. </h3>
+
+<p style="text-align: justify;">Caracterizar las relaciones entre algunos indicadores macroeconómicos y los costos y gastos de ventas de las empresas colombianas vigiladas por la super sociedades.</p>
+
+
+```{r,echo=FALSE}
+# Instalamos las librerías que se utilizarán
+
+# packages <- c("readxl", "plotly", "tidyverse", "scales",'reshape2','Matrix','robustbase', 'kableExtra')
+# install.packages(packages,dependencies = T)
+# install.packages("lme4",
+#                  repos=c("http://lme4.r-forge.r-project.org/repos",
+#                          getOption("repos")[["CRAN"]]))
+```
+
+<ol>
+<h3 style="text-align: justify;">1. Cargamos las librerías que se utilizarán.</h3>
+</ol>
+
+```{r warning = FALSE, message=FALSE}
+library(ggplot2)    # Es un paquete de visualización de datos.
+library(readxl)     # Es un paquete para cargar archivos de excel.
+library(plotly)     # Es un paquete de visualización interactivo de datos.
+library(dplyr)      # Es un paquete de manipulación de datos.
+library(reshape2)   # Es un paquete para transformar datos entre formatos cortos y largos.
+library(lme4)       # Es un paquete para ajustar modelos lineales y lineales de efectos mixtos generalizados.
+library(robustbase) # Es un paquete de herramientas que permiten analizar datos con métodos robustos.
+library(knitr)      # Es un motor para generar reportes dinámicos.
+library(kableExtra) # Es un paquete para crear tablas complejas de HTML o 'LaTeX'.
+library(lattice)    # Es un paquete que mejora los gráficos de la base R.
+library(lmerTest)   # Es un paquete que proporciona valores p en anova de tipo I, II o III.
+library(broom.mixed)# Es un paquete que ayuda a convertir la informacion de los modelos mixtos en dataframes.
+```
+
+<ol>
+<h3 style="text-align: justif;">2. Cargamos los datos de estados financieros de las super sociedades.</h3>
+<p style="text-align: justify;"> Seleccionamos 38 empresas con el CIIU G4511 y G4512 correspondientes a comercio de vehículos automotores nuevos y usados con el fin de evaluar como afecta en sus costos las variables macroeconómicas durante los años 2016, 2017, 2018 y 2019.</p>
+</ol>
+
+```{r echo=FALSE}
+df <- read_excel("DataProcesada/InfoCompleta.xlsx",)
+names(df)[names(df) == "Año"] <- "Anio"
+names(df)[names(df) == "Razon Social"] <- "Razon.Social"
+```
+
+```{r, echo=FALSE}
+Columns <- c("Razon.Social", "CIIU" ,"Nit", "Anio", "Ingresos de actividades ordinarias", "Costo de ventas", "Ganancia bruta")
+kable(df[1:5,Columns],caption='Datos:', booktabs = T) %>%
+kable_styling(font_size = 8)
+```
+<ol>
+<h3 style="text-align: justify;"> 3. Preparamos los datos.</h3>
+</ol>
+
+```{r echo=FALSE}
+## Definimos vectores con nombres de algunas variables
+costcolnames <- c("Costo de ventas","Costos de distribución","Gastos de administración","Costos financieros")
+ingcolnames <- c("Ingresos de actividades ordinarias","Ingresos financieros")
+idcolnames <- c("Razon.Social","Nit")
+datecolnames <- c('Anio')
+```
+
+<ul>
+<ul>
+<li>
+<p style="text-align: justify;">Cambiamos algunos tipos de datos.</p>
+</li>
+</ul>
+</ul>
+
+```{r}
+df$Anio <- as.character.Date(df$Anio)
+```
+
+
+<ul>
+<ul>
+<li>
+<p style="text-align: justify;">Identificamos los valores `na` que se encuentran en las variables utilizadas y los reemplazamos por 0.</p>
+</li>
+</ul>
+</ul>
+
+```{r}
+for(col in append(costcolnames,ingcolnames)){
+  nacol<- sum(is.na(df[[paste(col)]]))
+  print(paste0("Valores NA para ",col," = ", nacol))
+  df[[paste(col)]][is.na(df[[paste(col)]])] <- 0
+}
+```
+
+<ul>
+<ul>
+<li>
+<p style="text-align: justify;">Calculamos la variable que representa los costos sobre las ventas.</p>
+</li>
+</ul>
+</ul>
+
+```{r}
+df['CostosSobreVentas'] <- rowSums(df[costcolnames],na.rm=TRUE)/rowSums(df[ingcolnames],na.rm=FALSE)
+naCostosSobreVentas <- sum(is.na(df$CostosSobreVentas))
+```
+
+<ul>
+<ul>
+<li>
+<p style="text-align: justify;">Garantizamos que cada una de las empresas del sector contenga información para los años (2016, 2017, 2018, 2019).</p>
+</li>
+</ul>
+</ul>
+
+```{r}
+numNitAcum <- df %>% count(df$Nit)
+EmpresasTodosAnios <- filter(numNitAcum, n == 4)
+EmpresasTodosAnios <- data.matrix(EmpresasTodosAnios$`df$Nit`)
+df <- filter(df, df$Nit  %in% EmpresasTodosAnios)
+```
+
+<ol>
+<h3 style="text-align: justify;"> 4. Realizamos el gráfico de cajas y bigotes del conjunto de datos de la super sociedades sobre la variable Costos sobre ventas discriminado por Año.</h3>
+<p>&nbsp;</p>
+<p style="text-align: justify;">Las dimensiones de la caja est&aacute;n determinadas por la distancia del rango intercuart&iacute;lico, que es la diferencia entre el primer y tercer cuartil, en este caso el valor de los costos sobre los ingresos nos indica si las empresas durante cada a&ntilde;o presento perdidas o ganancias, donde los valores superiores a 1 representan perdidas y los valores inferiores ganancias, por ejemplo:</p>
+<ul>
+<li style="text-align: justify;">Para el a&ntilde;o 2016 vemos que el indicador de costos sobre las ventas se mantuvo sobre una mediana de 0.996218 teniendo un dato at&iacute;pico m&aacute;ximo de 1.333111 y m&iacute;nimo 0.8850207.</li>
+<li style="text-align: justify;">Para el a&ntilde;o 2017 vemos que el indicador de costos sobre las ventas se mantuvo sobre una mediana de 1.001007 teniendo un dato at&iacute;pico m&aacute;ximo de 1.354469 y m&iacute;nimo 0.8750257.</li>
+<li style="text-align: justify;">Para el a&ntilde;o 2018 vemos que el indicador de costos sobre las ventas se mantuvo sobre una mediana de 0.993361 teniendo un dato at&iacute;pico m&aacute;ximo de 1.34162 y m&iacute;nimo 0.1359925.</li>
+<li style="text-align: justify;">Para el a&ntilde;o 2019 vemos que el indicador de costos sobre las ventas se mantuvo sobre una mediana de 0.992665 teniendo un dato at&iacute;pico m&aacute;ximo de 1.156757 y m&iacute;nimo 0.0958159.</li>
+</ul>
+<p>&nbsp;</p>
+</ol>
+<p>&nbsp;</p>
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+fig <- plot_ly(y = ~df$Anio, x = ~df$CostosSobreVentas, type = "box", color = ~df$Anio, colors = "Set1")
+
+x <- list(
+  title = "Costos sobre ventas.",
+  showticklabels = TRUE,
+  tickangle = 45,
+  exponentformat = "E"
+)
+
+y <- list(
+  title = "Año.",
+  showticklabels = TRUE,
+  tickangle = 45,
+  exponentformat = "E"
+)
+
+fig <- fig %>% layout(title = "Indicador costos sobre ventas por años", xaxis = x, yaxis = y)
+
+ppc <- htmltools::div( fig, align="center" )
+
+ppc
+
+```
+
+
+<ol>
+<h3 style="text-align: justify;"> 5. Detección de datos Atípicos</h3>
+<p style="text-align: justify;"> Para la deteción de datos atípicos utilizamos la distancia de mahalanobis a través de la matriz de covarianzas hallada por el método por pares ortogonalizada descrita por Maronna and Zamar (2002). La propuesta por pares se remonta a Gnanadesikan y Kettenring (1972).</p>
+<p style="text-align: justify;"> La función para calcular la estimación de covarianza robusta entre dos vectores seda por la ecucación: </p>
+<p style="text-align: center;">$(s^2(X + Y) - s^2(X - Y))/4$ donde $S()$ es la estimación de la escala $sigmamu()$.</p>
+<p style="text-align: justify;"> La función $sigmamu()$ calcula estimaciones robustas univariadas de localización y escala. Por defecto, debe devolver un único valor numérico que contenga la estimación a escala robusta (desviación estándar).</p>
+</ol>
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+# Utilizamos reshape para pivotear y crear una tabla con el indice por años en columnas
+cols2clean <- c('Nit','Razon.Social','Anio','CostosSobreVentas')
+df2clean<-dcast(data = df[c(cols2clean)], formula = Razon.Social*Nit ~ Anio, fun.aggregate = sum, value.var = "CostosSobreVentas")
+
+# Utilizamos la librería robustbase para hallar la matriz de covarianza robusta OGK
+X <- data.matrix(df2clean[, 3:6])
+cOGK <- covOGK(X, n.iter = 5, sigmamu = scaleTau2,
+               weight.fn = hard.rejection,keep.data=FALSE)
+covPlot(X, m.cov = cOGK, classic = TRUE, which = "dd" )
+
+```
+
+<ol>
+<p style="text-align: justify;">El método $OGK$ nos indica los datos atípicos pero consideramos esta detección muy estricta, consideramos tomar todos los datos que se encuentran dentro del percentil 95% de las distancias calculadas e identificamos que las empresas por fuera de este rango son tratados como datos atipicos, por ende eliminados del estudio. Se realizo una investigación de estas empresas y logramos identificar que:</p>
+<ul>
+<li style="text-align: justify;">DISTRIBUIDORA LOS AUTOS DE COLOMBIA SAS, se evidenció que tuvieron p&eacute;rdidas netas en los a&ntilde;os 2017 y 2018.&nbsp;<a href="https://www.emis.com/php/company-profile/CO/Distribuidora_Los_Autos_De_Colombia_Sas_en_3758649.html">https://www.emis.com/php/company-profile/CO/Distribuidora_Los_Autos_De_Colombia_Sas_en_3758649.html</a>&nbsp;</li>
+</ul>
+<ul>
+<li style="text-align: justify;">CASATORO DE LOS ANDES SAS, se evidenció que no existe ingresos ni ganancias registrados en los a&ntilde;os 2018 y 2019, por eso no tenemos informaci&oacute;n de sus estados financieros.&nbsp;<a href="https://www.emis.com/php/company-profile/CO/Casatoro_De_Los_Andes_SAS_es_3268191.html">https://www.emis.com/php/company-profile/CO/Casatoro_De_Los_Andes_SAS_es_3268191.html</a></li>
+</ul>
+</ol>
+
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+# Calculamos las distancias de Mahalanobis superiores al percentil 95
+
+distancias <- cOGK$distances
+P95 <- quantile(distancias,probs=c(0.95))
+Dist95= distancias>P95
+
+# Calculamos los Nits outlaiers y no outliers
+
+NitsOut <- df2clean$Nit[c(Dist95)]
+NitsIn <- df2clean$Nit[c(!Dist95)]
+
+
+# Eliminamos los Nits correspondientes a outlaiers del dataframe de superfinanciera
+dfclean <- df[df$Nit %in% NitsIn,]
+```
+
+<ol>
+<h3 style="text-align: justify;"> 6. Realizamos nuevamente el gráfico de cajas y bigotes del conjuto de datos de super sociedades sin datos atípicos sobre la variable CostosSobreVentas discriminado por Año.</h3>
+</ol>
+<p> &nbsp; </p>
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+fig <- plot_ly(y = ~dfclean$Anio, x = ~dfclean$CostosSobreVentas, type = "box", color = ~dfclean$Anio, colors = "Set1")
+
+
+x <- list(
+  title = "Costos sobre ventas.",
+  showticklabels = TRUE,
+  tickangle = 45,
+  exponentformat = "E"
+)
+
+y <- list(
+  title = "Año.",
+  showticklabels = TRUE,
+  tickangle = 45,
+  exponentformat = "E"
+)
+
+
+fig <- fig %>% layout(title = "Indicador costos sobre ventas por años", xaxis = x, yaxis = y)
+
+ppc <- htmltools::div( fig, align="center" )
+
+ppc
+```
+
+<ol>
+<h3 style="text-align: justify;"> 7. Segmentamos los nits.</h3>
+<p style="text-align: justify;">En este caso segmentamos los nit en cuatro grupos de acuerdo a la suma de las ventas de los cuatro años en consideración.</p>
+<ul>
+<li style="text-align: justify;">Utilizamos reshape para pivotear y crear una tabla con el total de ingresos ordinarios por nit.</li>
+</ul>
+</ol>
+
+```{r, warning=FALSE, message=FALSE}
+colstemp <- c('Nit','Razon.Social','Anio','Ingresos de actividades ordinarias')
+dfclasxVtas<-dcast(data = dfclean[c(colstemp)], formula = Nit ~ Anio, fun.aggregate = sum, value.var = "Ingresos de actividades ordinarias")
+cols2sum <- colnames(dfclasxVtas)[-c(1)]
+dfclasxVtas$Total_Ventas <- rowSums(dfclasxVtas[,cols2sum])
+```
+
+<ol>
+<ul>
+<li style="text-align: justify;">Creamos 4 grupos por el monto total de ventas. En este caso balanceamos los grupos de forma uniforme teniendo en cuenta la suma de sus ingresos durante los cuatro años de la siguiente forma:
+</li>
+<ul>
+<li style="text-align: justify;">Menos de 300 millones bajo.</li>
+<li style="text-align: justify;">Entre 300 a 600 millones medio_bajo.</li>
+<li style="text-align: justify;">Entre 600 a 900 millones medio_alto.</li>
+<li style="text-align: justify;">Superior a 900 millones alto.</li>
+</ul>
+</ul>
+</ol>
+
+```{r, warning=FALSE, message=FALSE}
+dfclasxVtas$GrupoVentas = cut(dfclasxVtas$Total_Ventas,breaks = c(0,300e6,600e6,900e6,1e90),labels=c('bajo','medio_bajo', 'medio_alto','alto'))
+summary(dfclasxVtas$GrupoVentas)
+```
+
+<ol>
+<ul>
+<li style="text-align: justify;">Asignamos los nits de cada grupo al dataframe base sin datos atipicos.</li>
+</ul>
+</ol>
+
+```{r, warning=FALSE, message=FALSE}
+Columns <- c("Razon.Social", "CIIU" ,"Nit", "Anio", "GrupoVentas", "CostosSobreVentas")
+
+dfclean=merge(dfclasxVtas[c('Nit','GrupoVentas')],dfclean,by=c("Nit"))
+
+kable(dfclean[1:5,Columns],caption='Datos: ', booktabs = T) %>%
+kable_styling(font_size = 8)
+```
+
+<ol>
+<h3 style="text-align: justify;"> 8. Cargamos los datos de variables económicas y demográficas mensuales.</h3>
+</ol>
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+dfIPP <- read_excel("DataProcesada/IPP.xlsx")
+
+dfIPC <- read_excel("DataProcesada/IPC.xlsx")
+
+dfIPC$periodo <- as.numeric(as.character(dfIPC$periodo))
+
+dfDTF <- read_excel("DataProcesada/DTF.xlsx")
+
+dfDesempleo <- read_excel("DataProcesada/Desempleo.xlsx")
+
+dfGasolina <- read_excel("DataProcesada/GasolinaCteBogota.xlsx")
+
+colnames(dfGasolina)[2] <- 'GasolCte'
+
+dfTRM <- read_excel("DataProcesada/TRM.xlsx")
+
+# Consolidamos las variables económicas de forma mensual
+
+dfVars=merge(dfIPP[-c(3,4,5)],dfIPC[-c(3)],by=c("periodo"))           # Unimos los dataframes de IPP e IPC               
+dfVars=merge(dfVars,dfDTF,by=c("periodo"))          # Adicionamos el dataframe de DTF
+dfVars=merge(dfVars,dfDesempleo,by=c("periodo"))    # Adicionamos el dataframe de Desempleo
+dfVars=merge(dfVars,dfGasolina,by=c("periodo"))     # Adicionamos el dataframe de Precio Gasolina
+dfVars=merge(dfVars,dfTRM,by=c("periodo"))          # Adicionamos el dataframe de la TRM
+dfVars <- na.omit(dfVars)                           # Eliminamos valores NA
+
+
+# Cambiamos el tipo de datos de período de numérico a fecha.
+
+dfVars$periodo=as.Date(paste(substr(dfVars$periodo, 1, 4), substr(dfVars$periodo, 5, 6), "01", sep = "-"))
+dfVars$periodo=as.Date(dfVars$periodo, origin = "2000-12-25")
+
+# Calculamos el año.
+ 
+dfVars$Anio = as.numeric(substring(dfVars$periodo,1,4))
+
+columnas <- c("Anio", "periodo","IPP", "IPC", "DTF", "Desempleo","GasolCte","TRM")
+kable(dfVars[1:10,columnas],caption='Datos: ', booktabs = T) %>%
+kable_styling(font_size = 8)
+```
+
+<ol>
+<h3 style="text-align: justify;"> 9. Observamos correlaciones entre las variables económicas mensuales.</h3>
+<p style="text-align: justify;">Observamos en el siguiente gráfico las correlaciones entre las variables económicas a estudiar, entre las cuales se destaca la alta correlación que existe entre la GASOLINA - IPC y GASOLINA - DTF, esto se debe ya que cuando sube la gasolina impacta en los costos de transporte y a si mismo los productos de la canasta familiar.</p>
+</ol>
+
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+panel.hist <- function(x, ...)
+{
+    usr <- par("usr"); on.exit(par(usr))
+    par(usr = c(usr[1:2], 0, 1.5) )
+    h <- hist(x, plot = FALSE)
+    breaks <- h$breaks; nB <- length(breaks)
+    y <- h$counts; y <- y/max(y)
+    rect(breaks[-nB], 0, breaks[-1], y, col = "blue", ...)
+
+}
+panel.cor <- function(x, y, digits = 2, prefix = "", cex.cor, ...)
+{
+    usr <- par("usr"); on.exit(par(usr))
+    par(usr = c(0, 1, 0, 1))
+    r <- abs(cor(x, y,method='spearman'))
+    txt <- format(c(r, 0.123456789), digits = digits)[1]
+    txt <- paste0(prefix, txt)
+    if(missing(cex.cor)) cex.cor <- 0.8/strwidth(txt)
+    text(0.5, 0.5, txt, cex = cex.cor * r)
+}
+colnames = c('IPP',"IPC",'DTF',"Desempleo", "GasolCte","TRM")
+pairs(dfVars[c(colnames)],lower.panel = panel.cor,diag.panel = panel.hist)
+
+```
+<ol>
+<p style="text-align: justify;">Consolidamos las variables económicas de forma anual.</p>
+</ol>
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+dfVarsanual=aggregate(dfVars[c(4,5,6,7)], by=list(Anio=dfVars$Anio), FUN=mean)
+dfVarsanual=merge(dfVarsanual,dfVars[c(2,3,8)][substring(dfVars$periodo,6,7)=="12",],by=c('Anio'))
+kable(dfVarsanual[1:4,],caption='Datos: ', booktabs = T) %>%
+kable_styling(font_size = 8)
+```
+
+<ol>
+<h3 style="text-align: justify;"> 10. Consolidamos los dataframes anuales de estados financieros y variables económicas.</h3>
+</ol>
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+dfVarstot=merge(dfclean[c('Razon.Social','GrupoVentas','Nit','Anio','CostosSobreVentas')],dfVarsanual,by=c("Anio"))
+write.csv(dfVarstot, file = "dflimpia.csv")
+kable(dfVarstot[1:10,],caption='Datos: ', booktabs = T) %>%
+kable_styling(font_size = 8)
+```
+
+<ol>
+<h3 style="text-align: justify;"> 11. Ahora Ploteamos regresiones lineales de la variable CostosSobreVentas por Nit para ver su comportamiento en el período de años analizado.</h3>
+</ol>
+
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+p <- ggplot(data=dfclean, mapping=aes(x=as.numeric(Anio), y=CostosSobreVentas, color=Razon.Social)) + geom_point() + geom_smooth(data=dfclean, method = "lm", se=FALSE, mapping=aes(x=as.numeric(Anio), y=CostosSobreVentas))
+H <- p + labs(x = "Año", y = "Costos sobre ventas", colour = "Razón social")
+
+fig <- ggplotly(H)
+ppc <- htmltools::div( fig, align="center" )
+ppc
+```
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+p <- ggplot(data = dfclean, 
+       aes(x = as.numeric(Anio) , y = CostosSobreVentas, color=Razon.Social)) +  geom_point()  + theme_bw() + 
+  geom_smooth(method = lm,
+              se     = FALSE, 
+              col    = "black",
+              size   = .5, 
+              alpha  = .8)+
+  facet_wrap(~ Nit) +   theme(legend.position = "none")+
+  xlab(paste(" \n Año" )) + ylab(paste("\n \n Costos sobre ventas" )) 
+
+H <- p + labs(title = "Regresión lineal simple Costo sobre ventas ~ Año")+ theme(plot.title = element_text(hjust = 0.5),
+  plot.subtitle = element_text(hjust = 0.5))
+
+fig <- ggplotly(H)
+
+ppc <- htmltools::div( fig, align="center" )
+ppc
+
+
+```
+
+<ol>
+<p style="text-align: justify;">
+En la gráfica anterior se evidencia el comportamiento de la variable Costos sobre ventas durante el avance de los años, el coeficiente varía linealmente con el tiempo para cada empresa, sin embargo, parece que las pendientes y los interceptos varían entre cada sujeto lo que sugiere un modelo de intercepto y pendiente aleatorea.
+</p>
+</ol>
+
+<ol>
+<h3 style="text-align: justify;"> 12. Ahora ploteamos regresiones lineales de la variable CostosSobreVentas por GrupoVentas para ver su comportamiento en el período de años analizado.</h3>
+</ol>
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+p <- ggplot(data=dfclean, mapping=aes(x=as.numeric(Anio), y=CostosSobreVentas, color=GrupoVentas)) + geom_point() + geom_smooth(data=dfclean, method = "lm", se=FALSE, mapping=aes(x=as.numeric(Anio), y=CostosSobreVentas))
+
+H <- p + labs(x = "Año.", y = "Costos sobre ventas.", colour = "Grupo ventas.")
+
+fig <- ggplotly(H)
+
+ppc <- htmltools::div( fig, align="center" )
+ppc
+
+```
+<ol>
+<p style="text-align: justify;">
+Evidenciamos que el grupo de ventas bajo y medio alto tienen pendiente negativa y el medio bajo y alto tienen una pendiente constante, es decir, a medida que la variable tiempo incrementa el coeficiente de costos sobre ventas no varia.
+</p>
+</ol>
+
+
+<ol>
+<h3 style="text-align: justify;"> 13. Normalizamos las variables económicas del dataframe.
+</h3>
+</ol>
+
+<ol>
+<p style="text-align: justify;">
+Se determinó estandarizar las variables restándoles a cada una la media y dividiendo este término por su desviación estándar. Cabe anotar que en las variables se cuenta con un grupo de ellas que son índices ('IPP','IPC') y otro grupo como valores ('DTF','Desempleo','GasolCte','TRM').
+</p>
+</ol>
+
+```{r , warning=FALSE, message=FALSE}
+
+dfVarstotescal <- dfVarstot[c('Anio','Razon.Social','Nit','GrupoVentas', 'CostosSobreVentas')]
+
+for (i in colnames){
+dfVarstotescal[paste0(i)] <- (dfVarstot[[paste(i)]] - mean(dfVarstot[[paste(i)]] )) / sd(dfVarstot[[paste(i)]])
+}
+```
+
+<ol>
+<h3 style="text-align: justify;">
+14. <strong>Modelo 1</strong>: regresión con intercepto aleatorio segun el año.
+</h3>
+</ol>
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+dfVarstotescal$Nit <- as.character(dfVarstotescal$Nit)
+dfVarstotescal$Anio <- as.numeric(dfVarstotescal$Anio)
+dfVarstotescal$CostosSobreVentas <- as.numeric(dfVarstotescal$CostosSobreVentas)
+
+modelo1 <- lmer(CostosSobreVentas ~ Anio + (Anio | Nit), REML = FALSE, data = dfVarstotescal)
+summary(modelo1)
+```
+<ol>
+<p style="text-align: justify;>
+El estimado de la desviación estadar de los efectos aleatoreos para el intercepto y la pendiente es de 4.059e-02 % y 9.298e-06 % por año. Los coefiecientes de los efectos fijos, $\beta$ 11.101319 y -0.005003 para el intercepto y la pendiente.
+</p>
+<p style="text-align: justify;>
+El efecto año no es significativo en este caso, dado el valor del t estadístico -1.276 y p valor 0.206, por lo tanto utilizaremos otro modelo base como se muestra a continuación:
+</p>
+</ol>
+
+<ol>
+<h3 style="text-align: justify;">
+15. <strong>Modelo 2</strong>: regresión con intercepto aleatorio segun el Nit.
+</h3>
+</ol>
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+modelBase <- lmer(CostosSobreVentas ~ 1 + ( 1 | Nit), REML = FALSE, data = dfVarstotescal)
+summary(modelBase)
+performance::icc(modelBase)
+ranova(modelBase)
+```
+<ol>
+<p style="text-align: justify;>
+Al hacer el análisis ANOVA repetido (rANOVA) de este modelo se puede comprobar las significancia del efecto aleatorio del intercepto. El coeficiente de correlación interclase (ICC) puede interpretarse como la proporción de la varianza explicada por la estructura de agrupación en la población, en este caso el 60% de la varianza del intercepto es explicada por los NITs.  Con esto confirmamos que el modelo con intercepto aleatorio es pertinente.
+</p>
+<p>
+Realizamos un análisis de normalidad de los residuales con un QQplot y hemos encontrado que el supuesto se cumple parcialmente, por que a pesar que la mayoría de los datos están sobre la línea algunos en las colas se alejan.
+</p>
+</ol>
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+qqmath(modelBase, id=0.05)
+```
+
+<ol>
+<p style="text-align: justify;">
+En la Siguiente grafica encotramos que existe heterocedasticidad si se observan los residuales por nit, es decir, la varianza de los errores no es constante en todas las observaciones realizadas por nit.
+</p>
+</ol>
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+plot(modelBase, Nit ~ resid(., scaled=TRUE))
+```
+
+<ol>
+<p style="text-align: justify;">
+A continuación con el propósito de determinar la significancia de cada variable, probamos modelos con cada variable macroeconómica con efecto fijo y el intercepto con efecto aleatorio. Se escogieron los mejores modelos basados en los estadisticos t por fuera del rango [-2, 2] rechazando la hipótesis nula y con el menor AIC y BIC. Cada uno de estos modelos se comparó con el modelo base mediante una análisis de varianza ANOVA.
+</p>
+</ol>
+
+<ol>
+<h3 style="text-align: justify;">
+16. Creamos vectores con la combinación de variables que usaremos para testear el modelo.
+</h3>
+<p style="text-align: justify;">
+Con el objeto de automatizar el modelamiento creamos unas variables de las posibles combinacionanes de efectos fijos mixtos. Utilizaremos las posibles combinaciones en grupos de a una, dos y tres variables.
+</p>
+</ol>
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+combi1 <- c('IPP','IPC','DTF','Desempleo','GasolCte','TRM','GrupoVentas')
+print('    ##############       COMBINACION DE VARIABLES NONAS    ##############')
+ cat(" \n")
+combi1
+ cat(" \n \n")
+
+# creamos vector de combinación de pares combi2
+
+combi2 <- c()
+for (i in 1:length(combi1)) {
+  for (j in 1:length(combi1)) {
+    if (j > i) {
+      combi2 <- append(combi2,paste0(combi1[i],' + ',combi1[j]))
+    }
+  }
+}
+print('   ################     COMBINACION DE VARIABLES POR PARES   ###############')
+ cat("  \n")
+combi2
+ cat(" \n \n")
+
+ # creamos vector de combinación de trios combi3
+ 
+ 
+ cat(" \n \n")
+combi3 <- c()
+for (i in 1:length(combi1)) {
+  for (j in 1:length(combi1)) {
+    for (k in 1:length(combi1)) {
+      if ((j > i) & (k>j)) {
+        combi3 <- append(combi3,paste0(combi1[i],' + ',combi1[j],' + ',combi1[k]))
+      }
+    }  
+  }
+}
+print(' ################    COMBINACION DE VARIABLES POR TRIOS     #################')
+ cat(" \n")
+combi3
+ cat(" \n \n")
+
+
+ 
+ # creamos vector de todas las combinaciones
+ 
+ combin <- append((append(combi1,combi2)),combi3)
+
+```
+<ol>
+<h3 style="text-align: justify;">
+17. Aplicamos el modelo LMER de la librería lme4.
+</h3>
+<p style="text-align: justify;">
+Guardaremos los modelos resultantes de cada una de las combinaciones de efectos fijos en un conjunto de objetos para luego analizar sus resultados.
+</p>
+</ol>
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+## Guardamos los modelos de un efecto fijo
+Mdesc1 <- c()                   # Variable que guardará la descripción de cada modelo de un efecto fijo
+Mname1 <- c()                   # Variable que guardará el nombre de cada modelo de un efecto fijo
+for (i in 1:length(combi1)) {
+  f <- formula(paste("CostosSobreVentas~ ", combi1[i],'+ (1 | Nit)'))
+  assign(paste0('model1_',i),lmer(f, data=dfVarstotescal,REML=F))
+  Mdesc1=append(Mdesc1,paste0('model1_',i,'   ==>>  {',combi1[i],'}'))
+  Mname1=append(Mname1,paste0('model1_',i))
+}
+
+## Guardamos los modelos de dos efectos fijos
+Mdesc2 <- c()                   # Variable que guardará la descripción de cada modelo de dos efectos fijos
+Mname2 <-c()                    # Variable que guardará el nombre de cada modelo de dos efectos fijos
+for (i in 1:length(combi2)) {
+  f <- formula(paste("CostosSobreVentas~ ", combi2[i],'+ (1 | Nit)'))
+  assign(paste0('model2_',i),lmer(f, data=dfVarstotescal,REML=F))
+  Mdesc2=append(Mdesc2,paste0('model2_',i,'   ==>>  {',combi2[i],'}'))
+  Mname2=append(Mname2,paste0('model2_',i))
+}
+
+
+## Guardamos los modelos de tres efectos fijos
+Mdesc3 <- c()                   # Variable que guardará la descripción de cada modelo de tres efectos fijos
+Mname3 <- c()                   # Variable que guardará el nombre de cada modelo de tres efectos fijos
+for (i in 1:length(combi3)) {
+  f <- formula(paste("CostosSobreVentas~ ", combi3[i],'+ (1 | Nit)'))
+  assign(paste0('model3_',i),lmer(f, data=dfVarstotescal,REML=F))
+  Mdesc3=append(Mdesc3,paste0('model3_',i,'   ==>>  {',combi3[i],'}'))
+  Mname3=append(Mname3,paste0('model3_',i))
+}
+
+Mdescn <- append(append(Mdesc1,Mdesc2),Mdesc3)     # Variable que guardará la descripción de todos los modelos de 1,2 y 3 efectos fijos
+Mnamen <- append(append(Mname1,Mname2),Mname3)   # Variable que guardará el nombre de todos los modelos de 1,2 y 3 efectos fijos
+
+print('Nota: Con las combinaciones de efectos fijos se crean los siguientes modelos LMER  de la forma lmer(CostosSobreVentas ~ {Efectos Fijos} + (1 | Nit), data=dfVarstot,REML=F)',quote = FALSE)
+
+cat(" \n \n")
+print('################ NOMBRE Y DESCRIPCIÓN PARA LOS MODELOS CREADOS CON UN EFECTO FIJOS #################',quote = FALSE)
+ cat(" \n")
+Mdesc1
+
+cat(" \n \n")
+print('################ NOMBRE Y DESCRIPCIÓN PARA LOS MODELOS CREADOS CON DOS EFECTOA FIJOS #################',quote = FALSE)
+ cat(" \n")
+Mdesc2
+
+cat(" \n \n")
+print('################ NOMBRE Y DESCRIPCIÓN PARA LOS MODELOS CREADOS CON TRES EFECTOS FIJOS #################',quote = FALSE)
+ cat(" \n")
+Mdesc3
+```
+<ol>
+<p style="text-align: justify;">
+Usamos la librería broom.mixed para imprimir resultados de los modelos. Esta librería contiene funciones que permiten visualizar parte de los resultados de modelos, en particular es útil para el modelo lmer que tiene algunas particularidades frente a modelos mas sencillos.
+</p>
+<p style="text-align: justify;">
+Con la librería broom.mixed y usando la función tidy, extraemos los Betas estimados, desviación estandard y estadístico t para los factores fijos de todos los modelos
+</p>
+
+<h5 style="text-align: center;">
+<strong>Betas estimados, desviación estandard y estadístico t para los factores fijos de los modelos.</strong>
+</h5>
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+fixestimate <- c()
+for (i in 1:length(Mnamen)) {
+
+  fixestimate <- na.omit(rbind(fixestimate, cbind(Mnamen[i],Mdescn[i],tidy(eval(parse(text=Mnamen[i])))[3:6])))
+
+  }
+fixestimate <- fixestimate[fixestimate$term != '(Intercept)',]# quitamos el intercepto pues no tiene estadístico
+colnames(fixestimate)[1] <- "Modelname"
+colnames(fixestimate)[2] <- "Modeldesc"
+kable(fixestimate)
+```
+
+<p>&nbsp;</p>
+<p style="text-align: justify;">
+Con la librería broom.mixed y usando la función glance, extraemos los criterios de información AIC Y BIC para todos los modelos.
+</p>
+
+<h5 style="text-align: center;">
+<strong>Criterios relativos de calidad de los modelos estadísticos: AIC y BIC.</strong>
+</h5>
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+Modelcriterio <- c()
+for (i in 1:length(Mnamen)) {
+
+  Modelcriterio  <- rbind(Modelcriterio , cbind(Mdescn[i],glance(eval(parse(text=Mnamen[i])))[3:6]))
+
+  }
+
+kable(na.omit(Modelcriterio ))
+```
+
+<p>&nbsp;</p>
+
+<p style="text-align: justify;">
+Ahora buscamos los mejores modelos basados en que el estadístico t de todos los factores fijos sea superior en valor absoluto a 2
+</p>
+
+<h5 style="text-align: center;">
+<strong>Mejores modelos basados en que los estadísticos t sean mayores en valor absoluto a 2.</strong>
+</h5>
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+fixestimate['abstvalmenos2'] <- ifelse(abs(fixestimate$statistic)-2 >0,abs(fixestimate$statistic)-2, NA)
+dfBestModels = na.omit(aggregate(fixestimate$abstvalmenos2, by=list(Modelname=fixestimate$Modelname,Modeldesc=fixestimate$Modeldesc), FUN=mean))
+colnames(dfBestModels)[3] <- 'Puntaje'
+kable(dfBestModels)
+bestmodelnames <- dfBestModels$Modelname           # guardamos en una variable el nombre de los mejores modelos
+bestmodeldesc <- dfBestModels$Modeldesc            # guardamos en una variable la descripción de los mejores modelos
+```
+
+<p>&nbsp;</p>
+<p style="text-align: justify;">
+Y calculamos nuevamente los Betas estimados, desviación estandard y estadístico t pero sólo para los factores fijos de los modelos escogidos como mejores por tvalues.
+</p>
+
+<h5 style="text-align: center;">
+<strong>Betas estimados, desviación estandard y estadístico t para los factores fijos de los mejores modelos.</strong>
+</h5>
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+kable(fixestimate[fixestimate$Modelname %in% bestmodelnames,][1:6])
+```
+
+<p>&nbsp;</p>
+<p style="text-align: justify;">
+Finalmente encontramos los criterios de información AIC Y BIC para los  modelos escogidos como mejores por tvalues.
+</p>
+
+<h5 style="text-align: center;">
+<strong>Criterios de información de los mejores modelos estadísticos: AIC y BIC.</strong>
+</h5>
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+Modelcriterio <- c()
+for (i in 1:length(bestmodelnames)) {
+
+  Modelcriterio  <- rbind(Modelcriterio , cbind(bestmodeldesc[i],glance(eval(parse(text=bestmodelnames[i])))[3:6]))
+
+  }
+
+kable(na.omit(Modelcriterio ))
+```
+
+
+<p>&nbsp;</p>
+<p style="text-align: justify;">
+Comparamos ahora los mejores modelos encontrados con el modelo base, para observar si las métricas mejoran con la inclusión en el modelo de las variables económicas.
+</p>
+
+
+```{r}
+anova(modelBase,model3_1,model3_3)
+```
+
+<p>&nbsp;</p>
+<p style="text-align: justify;">
+Los modelos presentan criterios de información muy similares. El AIC es inferior para los modelos diferentes al Base que incluyen las variables macroeconómicas, sin embargo ocurre lo contrario con el BIC.
+</p>
+
+
+```{r, warning=FALSE, message=FALSE}
+MuMIn::r.squaredGLMM(modelBase)
+MuMIn::r.squaredGLMM(model3_1)
+MuMIn::r.squaredGLMM(model3_3)
+```
+
+<p>&nbsp;</p>
+<p style="text-align: justify;">
+El R2c representa la varianza explicada por los efectos fijos y el R2c explica la varianza incluidos los efectos fijos y los efectos aleatorios. Al revisar el ajuste R2c de los modelos, observamos que este valor es levemente mayor para los modelos 3_1 y 3_3 que incluyen variables macroeconómicas, frente al del modelo Base que no las incluye. Por tanto, aunque la variación no es muy alta, si es claro que el mejor modelo es uno de los dos escogidos que incluyen las variables económicas. Para el efecto escogeremos el modelo 3_1 que incluye las variables IPP, IPC y DTF.
+</p>
+
+<p style="text-align: justify;">
+Corremos entonces el mejor modelo escogido.
+</p>
+
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+model = lmer(CostosSobreVentas ~ IPP + IPC + DTF + ( 1| Nit), data=dfVarstotescal,REML=TRUE)
+anova(model)
+summary(model)
+a <- summary(model)
+
+intercepto <- a$coefficients[1]
+coefi1 <-  a$coefficients[2]
+coefi2 <-  a$coefficients[3]
+coefi3 <-  a$coefficients[4]
+
+
+```
+<p>&nbsp;</p>
+<p style="text-align: justify;">
+El modelo generó un intercepto de `r intercepto`, Los coeficientos del IPP, IPC y DTF son respectivamente `r coefi1`, `r coefi2`, `r coefi3`, lo que indica que el indicador de CostoSobreVentas aumenta con el incremento del IPC y DTF y por el contrario decrece con el aumento del IPP.
+</p>
+
+<p style="text-align: justify;">
+Los t values indican que las tres variables económicas escogidas son significantes, y la varianza de los efectos aleatorios de 0.05758 y 0.04517 para el Nit y el Residual indican que es pertinente el uso de tales efectos aleatorios por el grupo de identificador de compañía.
+</p>
+
+<p style="text-align: justify;">
+Corremos el modelo solo con efectos fijos para comprobar que los betas son idénticos.
+</p>
+
+```{r}
+
+modelfix = lm(CostosSobreVentas ~ IPP + IPC + DTF  , data=dfVarstotescal)
+anova(modelfix)
+summary(modelfix)
+
+```
+
+<p style="text-align: justify;">
+Al correr el modelo con solo efectos fijos, nos damos cuenta que no hay variación entre los coeficientes, excepto por un pequeño cambio en el intercepto.
+</p>
+
+
+<p style="text-align: justify;">
+Definido el modelo que mejor explica el comportamiento de los datos, ahora procederemos a evaluar su predicción. Para el efecto correremos el modelo con los datos de IPP, IPC y DTF de 2019, para proyectar el valor del CostosobreVentas del 2019 y lo contrastaremos con el valor real.
+</p>
+
+
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+dataFinal <- filter(dfVarstotescal, dfVarstotescal$Anio == 2019)[c("Nit","IPP", "IPC","DTF",'CostosSobreVentas')]
+dataFinal$yhat2019 <- predict(model3_1,newdata=dataFinal,allow.new.levels=T)
+dataFinal$ErrorEstPrcnt <- ((dataFinal$CostosSobreVentas - dataFinal$yhat2019)/dataFinal$CostosSobreVentas)*100
+
+
+
+#dataFinal
+fig <- plot_ly( x = dataFinal$ErrorEstPrcnt, type = "box")
+
+x <- list(
+  title = "Error porcentual de la estimación. ((yreal - yestimado) / yreal).",
+  showticklabels = TRUE,
+  tickangle = 45,
+  exponentformat = "E"
+)
+
+
+fig <- fig %>% layout(title = "Error porcentual de la estimación del CostoSobreVentas del 2019 vs. el real", xaxis = x)
+fig
+```
+
+
+<p style="text-align: justify;">
+El Boxplot anterior grafica el comportamiento del error de estimación porcentual. Se concluye que la mediana de los errores es 0.64%, que el 50% de los errores están entre -0,15% y 1.10% y que hay unos 6 nits que aparecen como outlayers que el error de estimación es demasiado alto y que son los predice bien el modelo.
+</p>
+ 
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+dataFinalB <- filter(dfVarstotescal, dfVarstotescal$Anio == 2019)[c("Nit","IPP", "IPC","DTF",'CostosSobreVentas')]
+dataFinalB$yhat2019 <- predict(modelBase,newdata=dataFinalB,allow.new.levels=T)
+dataFinalB$ErrorEstPrcnt <- ((dataFinalB$CostosSobreVentas - dataFinalB$yhat2019)/dataFinalB$CostosSobreVentas)*100
+
+
+#dataFinal
+fig <- plot_ly( x = dataFinalB$ErrorEstPrcnt, type = "box")
+
+x <- list(
+  title = "Error porcentual de la estimación. ((yreal - yestimado) / yreal).",
+  showticklabels = TRUE,
+  tickangle = 45,
+  exponentformat = "E"
+)
+
+fig <- fig %>% layout(title = "Error % de la estimación modelo Base del CostoSobreVentas del 2019 vs. el real", xaxis = x)
+fig
+```
+
+<ol>
+<h3 style="text-align: justify;">
+18. Estimación del esfuerzo.
+</h3>
+
+<p>&nbsp;</p>
+
+
+```{r echo=FALSE, message=FALSE}
+my_tbl <- tibble::tribble(
+  ~Actividad, ~Porcentaje,
+   "Consolidación de información",  "25%",
+   "Transformación de varibles y análisis descriptivo",  "40%",
+   "Ajuste y validación de modelos",  "25%",
+   "Redacción del reporte", "10%"
+  )
+require(rhandsontable)
+rhandsontable(my_tbl, rowHeaders = NULL,
+               digits = 3, useTypes = FALSE, search = FALSE,
+               width = NULL, height = NULL)
+```
+
+</ol>
+
+<ol>
+<h3 style="text-align: justify;">
+19. Referencias.
+</h3>
+<ul>
+<li>Superintendencia de sociedades. Portal de Información Empresarial. Enlace: http://pie.supersociedades.gov.co/Pages/default.aspx#/</li>
+<li>Anon. n.d. <em>Interactions in Multiple Linear Regression Basic Ideas</em>.</li>
+<li>Carlos, Juan, Correa Morales, Juan Carlos, and Salazar Uribe. n.d. <em>A Los Modelos Mixtos</em>.</li>
+<li>Jensen, Knut Helge. n.d. <em>Linear Mixed Effects Models (Lme)</em>.</li>
+<li>Repositorio Github. Enlace: https://github.com/jaarciah/Metodos-estadisticos-avanzados</li>
+
+</ul>
+</ol>
