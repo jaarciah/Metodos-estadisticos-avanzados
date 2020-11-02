@@ -1,0 +1,396 @@
+---
+title: "Bonus"
+author: "Arcia Jesus, Fajardo Daian, Salazar Carlos, Sepulveda Hernan "
+date: "11/1/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introducción.
+
+Este ejercicio se realiza con el fin de conocer la disponibilidad hotelera de acuerdo con la llegada de pasajeros en vuelos nacionales e internacionales. Para esto se realizará un análisis usando un modelo de regresión lineal, ya que como se podrá observar durante el ejercicio, las variables pueden ajustar a dicho modelo. 
+
+Conociendo la variable $x$ (Personas en vuelos nacionales e internacionales), se podrá predecir $y$ (ocupación hotelera). 
+
+La ecuación que se utilizará para el modelo, es generalizada: 
+
+$Y = B_0 + B_1X + \epsilon$
+
+
+
+## Desarrollo del ejercicio
+
+### Importar libreria
+
+```{r, warning=FALSE, message=FALSE}
+library(readr) #Facilita la obtención de datos de Excel y de R
+
+library(scales) #Graphical scales map data a la estética, y proporcionan métodos para determinar automáticamente las particiones, las etiquetas de los ejes y las leyendas.
+
+library(plotly) #La biblioteca de gráficos hace gráficos interactivos de calidad de publicación 
+
+library(tidyr) #El objetivo de tidyr es ayudarte a crear datos ordenados. Los datos ordenados son datos donde: Cada variable está en una columna.
+
+library(plyr) #Un conjunto de herramientas que resuelven un conjunto de problemas comunes: necesitas descomponer un gran problema en piezas manejables, operar en cada pieza y luego volver a poner todas las piezas juntas.
+
+library(e1071) #Funciones para el análisis de clases latentes, transformación de Fourier de corta duración, agrupación difusa, máquinas de vectores de apoyo, cálculo del camino más corto, agrupación en bolsas, clasificador Bayes ingenuo.
+
+library(lattice) #Un poderoso y elegante sistema de visualización de datos de alto nivel inspirado en los gráficos Trellis, con énfasis en los datos multivariados. 
+```
+
+### Carga y limpieza de los datos del ejercicio.
+
+Los datasets tomados para este ejercicio son las llegadas al aeropuerto nacional/internacional y el porcentaje de ocupación hotelera de Medellín, con un histórico de 2012 a 2019.
+
+Se realizó la carga de la información por medio de la función read_delim. Una vez cargado el dataset, se agrupó los datasets por año y mes con el fin de tener un total de personas que llegan al aeropuerto de Medellín. 
+
+Finalmente, se dio un formato de fechas '%Y%m%d' con el fin de poder comparar ambos datasets y se realizó una eliminación de valores nulos. 
+
+```{r echo=FALSE, message=FALSE}
+
+# Carga de la información histórica:
+llegada_nacional <- read_delim("llegada_pasajeros_mensual_por_aeropuerto_de_origen_nacional.csv", delim=",")
+llegada_internacional <- read_delim("llegada_mensual_pasajeros_aeropuerto_de_origen_internacional.csv", delim=",")
+porc_ocupacion_hotelera <- read_delim("porcentaje_ocupacion_hotelera_mensual_de_medellin.csv", delim=",")
+
+names(porc_ocupacion_hotelera)[names(porc_ocupacion_hotelera) == "periodo"] <- "Periodo"
+
+#Agrupamos por periodo las llegadas de vuelos y formateamos las fechas
+llegada_nacional <- aggregate(list(Valor_nal = llegada_nacional$valor), 
+                                by=list(Periodo = llegada_nacional$periodo), 
+                                FUN=sum)
+
+#Agrupamos por periodo las llegadas de vuelos y formateamos las fechas
+llegada_internacional <- aggregate(list(Valor_int = llegada_internacional$valor), 
+                                by=list(Periodo = llegada_internacional$periodo), 
+                                FUN=sum)
+```
+
+```{r echo=FALSE, message=FALSE}
+df = merge(llegada_nacional,llegada_internacional,by=c("Periodo")) 
+df$PasajerosTotales <- df$Valor_nal + df$Valor_int 
+df=merge(df,porc_ocupacion_hotelera,by=c("Periodo"))          
+
+```
+
+```{r echo=FALSE, message=FALSE}
+#Formato de las fechas
+df$Periodo <- as.Date(paste0(as.character(df$Periodo), '01'), format = '%Y%m%d')
+
+#Manejo de nulos
+df <- df[complete.cases(df), ]
+
+```
+
+
+
+### Graficas y Análisis. 
+
+Antes de construir el modelo de regresión lineal, es una buena practica conocer, explorar y analizar los datasets con el fin de conocer las variables.
+
+
+#### *Llegada de pasajeros en vuelos nacionales e internacionales*
+
+A continuación se observa la gráfica de la série de llegada de vuelos totales, donde se puede observar en la gráfica, existe un aumento en los vuelos nacionales, donde se ve un salto importante a finales del año 2012.
+
+
+```{r echo=FALSE, message=FALSE}
+
+#Graficar la llegada de los pasajeros en vuelos nacionales
+plot(df$Periodo, df$PasajerosTotales, las=1, type="l",
+     xlab= "Periodo", ylab = "Cantidad pasajeros", 
+     main = "Series de llegada de pasajeros", 
+     lwd=2, col = 6)
+grid()
+
+```
+
+
+
+#### *Ocupación Hotelera.*
+
+A continuación se observa la gráfica de la série de la ocupación hotelera, donde se ve un un comportamiento bimodal dentro de los años de análisis, también se puede observar que existe un crecimiento hasta el año 2016 y un leve decrecimiento entre 2016 y el 2018, del $65.5%$ al $60.3%$.
+
+```{r echo=FALSE, message=FALSE}
+
+#Graficar de la ocupación hotelera 
+plot(df$Periodo, df$valor, las = 1, type = "l", 
+     xlab = "Perido", ylab = "Porcentaje",
+     main = "Series de Porcentaje Ocupación", 
+     lwd = 2, col = 3)
+grid()
+
+```
+
+## Visualizar la relación entre las variables.
+
+### *Grafico de relación*
+
+Con el siguiente gráfico se intenta conocer la relación que existe entre la asignación hotelera y la llegada de pasajeros.
+
+Visualmente se puede observar que la tendencia de cremiento de la llagada de pasajeros se ve relacionada con el incremento en la ocupación hotelera.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+### generar un grafico dinamico con ploty
+datos <- df
+datos$PasajerosTotales <- rescale(datos$PasajerosTotales,to=c(1,100))
+datos$valor <- rescale(datos$valor,to=c(1,100))
+fig <- plot_ly(datos, x = ~Periodo, y = ~PasajerosTotales, type = 'scatter', mode = 'lines', name = 'Pasajeros')
+fig <- fig %>% add_trace(y = ~valor, name = 'Ocupacion')
+fig <- fig %>% layout(title = "Porcentaje Ocupacion Hotelera - Llegada Pasajeros")
+fig
+```
+Como se observa en la grafica anterior, los datos antes del 2009 se ve un cambio muy abrupto en la ocupación hotelera desde agosto 2008 hasta Febrero 2009, por lo cual se decide eliminar los datos inferiores a febrero de 2009
+
+```{r echo=FALSE, message=FALSE}
+df <- subset(df,Periodo > '2009-01-01')
+```
+
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+### generar un grafico dinamico con ploty
+datos <- df
+datos$PasajerosTotales <- rescale(datos$PasajerosTotales,to=c(1,100))
+datos$valor <- rescale(datos$valor,to=c(1,100))
+fig <- plot_ly(datos, x = ~Periodo, y = ~PasajerosTotales, type = 'scatter', mode = 'lines', name = 'Pasajeros')
+fig <- fig %>% add_trace(y = ~valor, name = 'Ocupacion')
+fig <- fig %>% layout(title = "Porcentaje Ocupacion Hotelera - Llegada Pasajeros")
+fig
+```
+### Grafico de dispersión
+
+Los gráficos de dispersión pueden ayudar a visualizar las relaciones lineales entre la respuesta y las variables de predicción. Con ese fin se dibuja un gráfico de dispersión para cada una de las variables junto con una línea que mejor ajuste la regresión como se puede ver a continuación.
+
+La grafica de dispersión sugiere una relación lineal positiva entre la llegada de pasajeros nacionales y la asignación hotelera.
+
+```{r echo=FALSE, message=FALSE}
+scatter.smooth(x = df$PasajerosTotales, 
+               y = df$valor, 
+               xlab = "Llegada Aeropuertos",
+               ylab = "Asignación hotelera",
+               main = "Relación Hoteles vs Pasajeros nacionales")
+
+```
+
+#### Gráfica Logaritmo para suavizar
+
+Existen varias formas para poder suavizar la linea con el fin que esta sea lo mas recta posible y asi ajustarse a una regresión lineal. Por lo que a continuación se puede observar una gráfica de suavización con la función logaritmo.
+
+##### *1. Logaritmo en "x" llegada de aeropuertos*
+
+
+```{r echo=FALSE, message=FALSE}
+
+#Grafica Logaritmo Y
+scatter.smooth(x = df$PasajerosTotales/10e8, 
+               y = df$valor, 
+               xlab = "Llegada Aeropuertos",
+               ylab = "Asignación hotelera",
+               main = "Relación Hoteles vs Pasajeros nacionales con logaritmo")
+
+```
+
+
+##### *2. Logaritmo en "y" Ocupación hotelera*
+
+```{r echo=FALSE, message=FALSE}
+
+#Grafica logaritmo en X
+scatter.smooth(x = df$PasajerosTotales, 
+               y = df$valor/10e8, 
+               xlab = "Llegada Aeropuertos",
+               ylab = "Asignación hotelera",
+               main = "Relación Hoteles con logaritmo vs Pasajeros nacionales")
+
+```
+
+##### *3. Logaritmo en la ocupación hotelera y la llegada de aeropuertos*
+
+```{r echo=FALSE, message=FALSE}
+
+#Grafica logaritmo en ambas en ambas variables
+scatter.smooth(x = df$PasajerosTotales/10e8, 
+               y = df$valor/10e8, 
+               xlab = "Llegada Aeropuertos",
+               ylab = "Asignación hotelera",
+               main = "Relación Hoteles con log vs Pasajeros nacionales con log")
+
+```
+
+Como se observa en la grafica, el comportamiento de los datos no tiene una gran diferencia al aplicar una transformación lineal con la función logaritmo natural.
+
+### Uso de Boxplot para identificar Outliers 
+
+Con el fin de encontrar los datos atípicos o aquellos datos que se encuentran por fuera del rango intercuartil (IQR) de 1,5*. Se graficará los boxplot, ya que se puede identificar los outliers de una forma mas amigable. 
+
+```{r echo=FALSE, message=FALSE}
+par(mfrow=c(1, 2))  # divide graph area in 2 columns
+
+### Boxplot 
+boxplot(df$PasajerosTotales, main="Cantidad de Pasajeros", sub=paste("Outlier rows: ", boxplot.stats(df$PasajerosTotales)$out))
+
+boxplot(df$valor, main="Porc Ocupacion Hotelera", sub=paste("Outlier rows: ", boxplot.stats(df$valor)$out))
+
+```
+
+Segun las graficas anteriores, no se detectan outliers que puedan impactar el analisis de la regresión lineal. 
+
+
+
+### Gráfica de densidad 
+
+Con el fin verificar si las variables se comportan de forma  Normal, se puede graficar la densidad de los datos.
+
+```{r echo=FALSE, message=FALSE}
+
+#Libreria para la función de asimetria
+
+par(mfrow=c(1, 2))
+
+# Grafica de densidad 'Llegada Aeropuerto'
+plot(density(df$PasajerosTotales), 
+     main = "Llegada Aeropuerto", 
+     ylab = "Frecuencia", 
+     sub = paste("Skewness:", round(e1071::skewness(df$PasajerosTotales), 2)))
+
+polygon(density(df$PasajerosTotales), col="purple")
+
+# Grafica de densidad 'Ocupacion Hotelera'
+plot(density(df$valor), 
+     main = "Ocupación Hotelera", 
+     ylab = "Frecuencia", 
+     sub=paste("Skewness:", round(e1071::skewness(df$valor), 2)))  
+
+polygon(density(df$valor), col="lightgreen")
+
+```
+
+Como se observa en las graficas, la llegada de pasajeros tiene una curva de frecuencia bimodal en el cual se encuentran dos máximos, lo que nos indica que no hay un único valor que se produce con la frecuencia más alta, en cambio hay dos valores de datos que tienen una alta frecuencia, esto nos hace pensar en las dos temporadas altas de vacaciones que se tienen al año. 
+
+Mientras que  la ocupación hotelera muestra una distribución normal, por lo que este set de datos es capaz de aproximar satisfactoriamente al valor de una variable aleatoria en una situación ideal. 
+
+
+
+### Analisis de Correlación 
+
+Con el fin de conocer las fuerza de relación entre las dos variables continuas, se realiza el cáclulo de coeficientes de correlación entras las variables de número de pasajeros y la ocupacón hotelera. 
+
+```{r echo=FALSE, message=FALSE}
+
+#Calcular la correlación entre las variables 
+correlacion <- cor(df$PasajerosTotales, df$valor)
+correlacion
+
+```
+El grado de dependencia que se encuentra entre los pasajeros nacionales e internacionales y la ocapción hotelera es de `r correlacion` que nos indica que su correlación es positiva, ya que a medida que aumentan los pasajeros tambien lo hace la asignación hotelera. Sin embargo, es importante recordar que la correlación no implica causalidad, y solo ayuda a entender mejor la relación entre las variables 
+
+Una correlación baja esta considerada entre $-0.2 < x < 0.2$ en el cual se plantearia que la variable respuesta es inexplicada por el predicto y por lo cual se debería buscar mejores variables explicativas, sin embargo, esto no sucede en este modelo.
+
+
+### Construir el Modelo de regresión lineal
+
+Ya que se pudo visualizar una relación lineal con las graficas de scatter y con la correlación, se puede realizar un modelo, la función utilizada es lm()
+
+```{r echo=FALSE, message=FALSE}
+#Normalización de datos 
+df$PasajerosTotales_n <- (df$PasajerosTotales -mean(df$PasajerosTotales))/sd(df$PasajerosTotales)
+
+df$valor_n <- (df$valor-mean(df$valor))/sd(df$valor)
+```
+
+```{r echo=FALSE, message=FALSE}
+# Modelo De Regresion Lineal
+linearMod <- lm(df$valor_n ~ df$PasajerosTotales_n, data=df)
+summary(linearMod)
+```
+Este modelo solo se explica en un $64.59%$ por lo que hay una relación entre el modelo y la variable de ocupación hotelera.
+
+Donde el intercepto es de $-2.496e^{-16}$ y el coeficiente de $X$ (pasajeros) es de $8.055e^{-01}$. y asi la asignación hotelera se encuentra en función de la llegada de pasajeros nacionales e internacionales a Medellin. 
+
+Hasta ahora el modelo se puede definir de la siguiente manera: 
+
+$asig_{hotel} = -2.496e^{-16} + 8.055e^{-01} X$
+
+
+## Diagnóstico de la regresión lineal
+
+Con el fin de saber si el modelo es estadísticamente significativo se realiza una visualización del resumen de la regresión, esto se puede calcular con la función summary()
+
+```{r echo=FALSE, message=FALSE}
+# Capturamos el resumen del modelo como un objeto
+modelSummary <- summary(linearMod)
+
+# model coefficients
+modelCoeffs <- modelSummary$coefficients
+beta.estimate <- modelCoeffs["df$PasajerosTotales_n", "Estimate"]  
+
+# Obtenemos std.error para la llegada de pasajeros al aeropuerto
+std.error <- modelCoeffs["df$PasajerosTotales_n", "Std. Error"]
+
+# Calculamos el t-statistic
+t_value <- beta.estimate/std.error
+
+# calculamos el p-Value
+p_value <- 2*pt(-abs(t_value), df=nrow(df)-ncol(df))
+
+# Calculamos f-statistic
+f_statistic <- linearMod$fstatistic[1]
+
+# parametros para el calculo del p-value del modelo
+f <- summary(linearMod)$fstatistic
+model_p <- pf(f[1], f[2], f[3], lower=FALSE)
+```
+
+```{r}
+beta.estimate
+
+```
+
+Segun el modelo nuestro R-squared: 0.6459 y un p_value de `r p_value` nos indica que el modelo explicao el 64.59% de variación de la ocupación hotelera.
+Se puede observarq que intercepto y la pendiente son estadisticamente significativas debido a que sus p_values son menores a 0.05 por lo que existe una dependencia entre los vuelos internacionales y la ocupación hotelera. 
+
+Con cada unidad de cambio la llegada de pasajeros la tasa de la ocupación hotelera cambiará en 0.8055135.
+
+#### *Residuales*
+
+Los residuos es la diferencia entre los valores de la ocupación hotelera y los valores que se predicen a partir de la regresion, y con el fin de conocer si se esta cumpliendo con la premisas de linealidad, homocedasticidad y normalidad de los residuos, se grafica en con plot la Normal Q-Q, donde se identifica que los residuales se comprotan de manera normal. 
+
+Con la grafica de Residuales vs ajustados, nos muestra que hay una varianza uniforme dentro de la llegada de pasajeros nacionales e internacionales, adicional se puede ver que los errores se encuentran centrados en 0.
+
+
+```{r echo=FALSE, message=FALSE}
+plot(linearMod, which = 1:2)
+```
+
+
+#### *p Value*
+Donde se puede observar un p value de `r p_value` en la llegada de los pasajeros, que nos indica que esta variables es relevante para el modelo ya que el valor p es menor al nivel de significancia estadística predeterminado de 0.05.
+
+
+#### *Coeficientes*
+Estos coeficientes son los $\beta$ de nuestra regresión lineal, donde 
+$asig_{hotel} = -2.496e^{-16} + 0.8055135 X$
+
+
+```{r echo=FALSE, message=FALSE}
+
+#Estimado del B_0
+beta.estimate <- modelCoeffs["df$PasajerosTotales_n", "Estimate"]  
+beta.estimate
+
+```
+La pendiente de nuestro predictor es igual a `r beta.estimate` y debido que esta variable se encuentra con un p_value de $<2e-16$ se indica que es significativa para el modelo. 
+
+#### *t-Value*
+Donde se puede observar un t value de `r t_value` al estar fuera del rango de -2 y 2, nos demuestra que la variable es significativa para el modelo. Es la relación entre la desviación del valor estimado de la llegada de pasajeros de su valor hipotético y su error estándar. La estadística T se utiliza en una prueba T para determinar si debe apoyar o rechazar la hipótesis nula.
+
+#### *Hipotesis*
+
+La hipótesis nula $H0$ se formula, indicanto que los coeficientes beta asociados a las variables son iguales a 0 y la hipótesis alternativa $H1$ que los coeficientes no son iguales a 0, que es lo mismo que decir que que existe una relación etre las variables independientes en cuestión y la variable dependiente. 
+
+De acuerdo al t_value = `r t_value`, se rechaza la hipotesis nula. 
+
